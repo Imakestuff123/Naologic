@@ -1,0 +1,312 @@
+/**
+ * Reflow service: reschedules work orders to satisfy constraints.
+ * Topological order, per–work-center conflict-free placement, shift-aware end time, maintenance windows.
+ *
+ * Algorithm:
+ * 1. Topological sort by dependencies (Kahn); throw on cycle.
+ * 2. Maintenance orders are fixed; others are rescheduled.
+ * 3. Per work center: earliest possible start = max(last end on center, max parent end, next available shift/maintenance).
+ * 4. End = calculateEndDateWithShifts(start, durationMinutes, shifts); push start past maintenance if end overlaps.
+ * 5. Build updatedWorkOrders, changes, and explanation.
+ */
+
+import { DateTime } from 'luxon';
+import {
+  calculateEndDateWithShifts,
+  getNextShiftStart,
+} from '../utils/date-utils';
+import { validateSchedule } from './constraint-checker';
+import type {
+  Change,
+  MaintenanceWindow,
+  ReflowInput,
+  ReflowResult,
+  Shift,
+  WorkCenter,
+  WorkOrder,
+} from './types';
+
+const UTC = 'utc';
+/** Used when no dependency or prior order constrains start. */
+const EPOCH = DateTime.fromMillis(0, { zone: UTC });
+/** Max iterations when advancing past maintenance to avoid infinite loop. */
+const MAX_MAINTENANCE_ITERATIONS = 500;
+
+function parseUTC(iso: string): DateTime {
+  return DateTime.fromISO(iso, { zone: UTC });
+}
+
+function toISO(dt: DateTime): string {
+  return dt.toISO() ?? '';
+}
+
+/** True if dt is inside any maintenance window [start, end). */
+function isInMaintenance(
+  dt: DateTime,
+  windows: MaintenanceWindow[]
+): boolean {
+  for (const w of windows) {
+    const start = parseUTC(w.startDate);
+    const end = parseUTC(w.endDate);
+    if (dt >= start && dt < end) return true;
+  }
+  return false;
+}
+
+/** True if [start, end) overlaps any maintenance window. */
+function rangeOverlapsMaintenance(
+  start: DateTime,
+  end: DateTime,
+  windows: MaintenanceWindow[]
+): { overlap: boolean; window?: MaintenanceWindow } {
+  for (const w of windows) {
+    const wStart = parseUTC(w.startDate);
+    const wEnd = parseUTC(w.endDate);
+    if (start < wEnd && end > wStart) return { overlap: true, window: w };
+  }
+  return { overlap: false };
+}
+
+/**
+ * Next moment >= dt that is inside a shift and not inside any maintenance window.
+ * Used for "earliest possible start" when we're after shift end or in maintenance.
+ */
+function getNextAvailableStart(
+  dt: DateTime,
+  shifts: Shift[],
+  windows: MaintenanceWindow[]
+): DateTime {
+  let current = dt;
+  if (shifts.length > 0) {
+    current = getNextShiftStart(current, shifts);
+  }
+  let iterations = 0;
+  while (isInMaintenance(current, windows) && iterations < MAX_MAINTENANCE_ITERATIONS) {
+    for (const w of windows) {
+      const wStart = parseUTC(w.startDate);
+      const wEnd = parseUTC(w.endDate);
+      if (current >= wStart && current < wEnd) {
+        current = wEnd;
+        if (shifts.length > 0) {
+          current = getNextShiftStart(current, shifts);
+        }
+        break;
+      }
+    }
+    iterations++;
+  }
+  return current;
+}
+
+/**
+ * Topological sort (Kahn) by dependsOnWorkOrderIds. Returns order IDs (workOrderNumber) in schedule order.
+ * Throws if a cycle is detected, with message including involved ids.
+ */
+function topologicalOrder(workOrders: WorkOrder[]): string[] {
+  const byNumber = new Map<string, WorkOrder>();
+  for (const wo of workOrders) {
+    byNumber.set(wo.workOrderNumber, wo);
+  }
+  const inDegree = new Map<string, number>();
+  const children = new Map<string, string[]>();
+  for (const wo of workOrders) {
+    inDegree.set(wo.workOrderNumber, 0);
+    children.set(wo.workOrderNumber, []);
+  }
+  for (const wo of workOrders) {
+    for (const depId of wo.dependsOnWorkOrderIds) {
+      if (!byNumber.has(depId)) continue;
+      inDegree.set(wo.workOrderNumber, (inDegree.get(wo.workOrderNumber) ?? 0) + 1);
+      const list = children.get(depId) ?? [];
+      list.push(wo.workOrderNumber);
+      children.set(depId, list);
+    }
+  }
+  const queue: string[] = [];
+  for (const [id, d] of inDegree) {
+    if (d === 0) queue.push(id);
+  }
+  const result: string[] = [];
+  while (queue.length > 0) {
+    const n = queue.shift()!;
+    result.push(n);
+    for (const c of children.get(n) ?? []) {
+      const d = (inDegree.get(c) ?? 1) - 1;
+      inDegree.set(c, d);
+      if (d === 0) queue.push(c);
+    }
+  }
+  if (result.length !== workOrders.length) {
+    const inCycle = workOrders
+      .map((wo) => wo.workOrderNumber)
+      .filter((id) => !result.includes(id));
+    throw new Error(
+      `Circular dependency detected involving work order(s): ${inCycle.join(', ')}`
+    );
+  }
+  return result;
+}
+
+export function reflow(input: ReflowInput): ReflowResult {
+  const { workOrders, workCenters } = input;
+
+  const orderIds = topologicalOrder(workOrders);
+  const byNumber = new Map<string, WorkOrder>();
+  for (const wo of workOrders) {
+    byNumber.set(wo.workOrderNumber, wo);
+  }
+  const workCenterByName = new Map<string, WorkCenter>();
+  for (const wc of workCenters) {
+    workCenterByName.set(wc.name, wc);
+  }
+
+  /** Per work center: list of { start, end } for already-scheduled non-maintenance orders. */
+  const scheduledByCenter = new Map<string, { start: DateTime; end: DateTime }[]>();
+  /** New start/end for each rescheduled order (workOrderNumber -> { start, end }). */
+  const newSchedule = new Map<string, { start: DateTime; end: DateTime }>();
+  const changes: Change[] = [];
+  const explanationParts: string[] = [];
+
+  const nonMaintenanceIds = orderIds.filter(
+    (id) => !byNumber.get(id)!.isMaintenance
+  );
+
+  for (const woId of nonMaintenanceIds) {
+    const wo = byNumber.get(woId)!;
+    const wc = workCenterByName.get(wo.workCenterId);
+    const shifts = wc?.shifts ?? [];
+    const maintenanceWindows = wc?.maintenanceWindows ?? [];
+
+    // --- Earliest possible start: no work center overlap ---
+    const lastEndOnCenter = (() => {
+      const list = scheduledByCenter.get(wo.workCenterId) ?? [];
+      if (list.length === 0) return null;
+      return DateTime.max(...list.map((x) => x.end));
+    })();
+
+    // --- Earliest possible start: dependencies (all parents must finish first) ---
+    let maxParentEnd: DateTime | null = null;
+    for (const depId of wo.dependsOnWorkOrderIds) {
+      const parent = byNumber.get(depId);
+      if (!parent) continue;
+      const parentEnd = parent.isMaintenance
+        ? parseUTC(parent.endDate)
+        : (newSchedule.get(parent.workOrderNumber)?.end ?? parseUTC(parent.endDate));
+      if (maxParentEnd === null || parentEnd > maxParentEnd) {
+        maxParentEnd = parentEnd;
+      }
+    }
+
+    // Earliest possible start = max(last end on same center, max parent end); then align to next shift/maintenance slot.
+    let candidateStart = DateTime.max(
+      lastEndOnCenter ?? EPOCH,
+      maxParentEnd ?? EPOCH
+    );
+    candidateStart = getNextAvailableStart(
+      candidateStart,
+      shifts,
+      maintenanceWindows
+    );
+
+    // End = shift-aware duration from candidate start (work "pauses" outside shift hours).
+    let end = calculateEndDateWithShifts(
+      candidateStart,
+      wo.durationMinutes,
+      shifts
+    );
+
+    // If [candidateStart, end] overlaps a maintenance window, push start to after that window and recompute end.
+    let iterations = 0;
+    for (;;) {
+      const { overlap, window } = rangeOverlapsMaintenance(
+        candidateStart,
+        end,
+        maintenanceWindows
+      );
+      if (!overlap || !window) break;
+      if (iterations >= MAX_MAINTENANCE_ITERATIONS) {
+        throw new Error(
+          `No valid slot for work order ${wo.workOrderNumber} on ${wo.workCenterId}: maintenance windows leave no room.`
+        );
+      }
+      const windowEnd = parseUTC(window.endDate);
+      candidateStart = getNextAvailableStart(
+        windowEnd,
+        shifts,
+        maintenanceWindows
+      );
+      end = calculateEndDateWithShifts(
+        candidateStart,
+        wo.durationMinutes,
+        shifts
+      );
+      iterations++;
+    }
+
+    newSchedule.set(woId, { start: candidateStart, end });
+    const list = scheduledByCenter.get(wo.workCenterId) ?? [];
+    list.push({ start: candidateStart, end });
+    scheduledByCenter.set(wo.workCenterId, list);
+
+    const oldStart = parseUTC(wo.startDate);
+    const oldEnd = parseUTC(wo.endDate);
+    if (candidateStart.toMillis() !== oldStart.toMillis()) {
+      changes.push({
+        workOrderId: wo.workOrderNumber,
+        field: 'startDate',
+        oldValue: wo.startDate,
+        newValue: toISO(candidateStart),
+        reason:
+          maxParentEnd != null && candidateStart.equals(maxParentEnd)
+            ? 'dependency'
+            : lastEndOnCenter != null && candidateStart.equals(lastEndOnCenter)
+              ? 'work center conflict'
+              : 'shift or maintenance',
+      });
+      explanationParts.push(
+        `Order ${wo.workOrderNumber} start moved to ${toISO(candidateStart)} (${maxParentEnd != null && candidateStart.equals(maxParentEnd) ? 'dependency on parent' : lastEndOnCenter != null ? 'after prior order on same center' : 'shift/maintenance'}).`
+      );
+    }
+    if (end.toMillis() !== oldEnd.toMillis()) {
+      changes.push({
+        workOrderId: wo.workOrderNumber,
+        field: 'endDate',
+        oldValue: wo.endDate,
+        newValue: toISO(end),
+        reason:
+          maxParentEnd != null || lastEndOnCenter != null
+            ? 'cascade from new start'
+            : 'shift or maintenance',
+      });
+    }
+  }
+
+  const updatedWorkOrders: WorkOrder[] = workOrders.map((wo) => {
+    if (wo.isMaintenance) return wo;
+    const next = newSchedule.get(wo.workOrderNumber);
+    if (!next) return wo;
+    return {
+      ...wo,
+      startDate: toISO(next.start),
+      endDate: toISO(next.end),
+    };
+  });
+
+  const validation = validateSchedule(updatedWorkOrders, workCenters);
+  if (!validation.valid) {
+    throw new Error(
+      `Reflow produced invalid schedule: ${validation.errors.join('; ')}`
+    );
+  }
+
+  const explanation =
+    explanationParts.length > 0
+      ? explanationParts.join(' ')
+      : 'No changes required; schedule already satisfies constraints.';
+
+  return {
+    updatedWorkOrders,
+    changes,
+    explanation,
+  };
+}

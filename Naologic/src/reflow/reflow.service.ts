@@ -6,16 +6,17 @@
  * 1. Topological sort by dependencies (Kahn); throw on cycle.
  * 2. Maintenance orders are fixed; others are rescheduled.
  * 3. Per work center: earliest possible start = max(last end on center, max parent end, next available shift/maintenance).
- * 4. End = calculateEndDateWithShifts(start, durationMinutes, shifts); push start past maintenance if end overlaps.
+ * 4. End = calculateEndDateWithShiftsAndMaintenance(start, durationMinutes, shifts, maintenance); work pauses at shift end or maintenance, resumes after.
  * 5. Build updatedWorkOrders, changes, and explanation.
  */
 
 import { DateTime } from 'luxon';
 import {
-  calculateEndDateWithShifts,
+  calculateEndDateWithShiftsAndMaintenance,
   getNextShiftStart,
   isWithinShift,
 } from '../utils/date-utils';
+import type { MaintenanceRange } from '../utils/date-utils';
 import { validateSchedule } from './constraint-checker';
 import type {
   Change,
@@ -50,20 +51,6 @@ function isInMaintenance(
     if (dt >= start && dt < end) return true;
   }
   return false;
-}
-
-/** True if [start, end) overlaps any maintenance window. */
-function rangeOverlapsMaintenance(
-  start: DateTime,
-  end: DateTime,
-  windows: MaintenanceWindow[]
-): { overlap: boolean; window?: MaintenanceWindow } {
-  for (const w of windows) {
-    const wStart = parseUTC(w.startDate);
-    const wEnd = parseUTC(w.endDate);
-    if (start < wEnd && end > wStart) return { overlap: true, window: w };
-  }
-  return { overlap: false };
 }
 
 /**
@@ -212,40 +199,17 @@ export function reflow(input: ReflowInput): ReflowResult {
       maintenanceWindows
     );
 
-    // End = shift-aware duration from candidate start (work "pauses" outside shift hours).
-    let end = calculateEndDateWithShifts(
+    // End = shift- and maintenance-aware: count only minutes in shift AND not in maintenance.
+    // Work pauses at end of day or at maintenance, resumes after (same as prompt example).
+    const maintenanceRanges: MaintenanceRange[] = maintenanceWindows.map(
+      (w) => ({ start: parseUTC(w.startDate), end: parseUTC(w.endDate) })
+    );
+    const end = calculateEndDateWithShiftsAndMaintenance(
       candidateStart,
       wo.durationMinutes,
-      shifts
+      shifts,
+      maintenanceRanges
     );
-
-    // If [candidateStart, end] overlaps a maintenance window, push start to after that window and recompute end.
-    let iterations = 0;
-    for (;;) {
-      const { overlap, window } = rangeOverlapsMaintenance(
-        candidateStart,
-        end,
-        maintenanceWindows
-      );
-      if (!overlap || !window) break;
-      if (iterations >= MAX_MAINTENANCE_ITERATIONS) {
-        throw new Error(
-          `No valid slot for work order ${wo.workOrderNumber} on ${wo.workCenterId}: maintenance windows leave no room.`
-        );
-      }
-      const windowEnd = parseUTC(window.endDate);
-      candidateStart = getNextAvailableStart(
-        windowEnd,
-        shifts,
-        maintenanceWindows
-      );
-      end = calculateEndDateWithShifts(
-        candidateStart,
-        wo.durationMinutes,
-        shifts
-      );
-      iterations++;
-    }
 
     newSchedule.set(woId, { start: candidateStart, end });
     const list = scheduledByCenter.get(wo.workCenterId) ?? [];
@@ -255,33 +219,50 @@ export function reflow(input: ReflowInput): ReflowResult {
     const oldStart = parseUTC(wo.startDate);
     const oldEnd = parseUTC(wo.endDate);
     if (candidateStart.toMillis() !== oldStart.toMillis()) {
+      const startReason =
+        maxParentEnd != null && candidateStart.equals(maxParentEnd)
+          ? 'dependency'
+          : lastEndOnCenter != null && candidateStart.equals(lastEndOnCenter)
+            ? 'work center conflict'
+            : 'shift or maintenance';
+      const startHow =
+        maxParentEnd != null && candidateStart.equals(maxParentEnd)
+          ? 'Earliest slot after dependency finished; aligned to shift/maintenance.'
+          : lastEndOnCenter != null && candidateStart.equals(lastEndOnCenter)
+            ? 'Earliest slot after prior order on same center; aligned to shift/maintenance.'
+            : 'Aligned to next available shift start (or after maintenance).';
       changes.push({
         workOrderId: wo.workOrderNumber,
         field: 'startDate',
         oldValue: wo.startDate,
         newValue: toISO(candidateStart),
-        reason:
-          maxParentEnd != null && candidateStart.equals(maxParentEnd)
-            ? 'dependency'
-            : lastEndOnCenter != null && candidateStart.equals(lastEndOnCenter)
-              ? 'work center conflict'
-              : 'shift or maintenance',
+        reason: startReason,
+        howCreated: startHow,
       });
       explanationParts.push(
         `Order ${wo.workOrderNumber} start moved to ${toISO(candidateStart)} (${maxParentEnd != null && candidateStart.equals(maxParentEnd) ? 'dependency on parent' : lastEndOnCenter != null ? 'after prior order on same center' : 'shift/maintenance'}).`
       );
     }
     if (end.toMillis() !== oldEnd.toMillis()) {
+      const endReason =
+        maxParentEnd != null || lastEndOnCenter != null
+          ? 'cascade from new start'
+          : 'shift or maintenance';
+      const endHow =
+        maxParentEnd != null || lastEndOnCenter != null
+          ? 'Recalculated from new start: duration counted only in shift and outside maintenance (work pauses at shift end or during maintenance, resumes after).'
+          : 'Recalculated: duration counted only in shift and outside maintenance; work pauses at shift end or during maintenance, resumes after, so end can be later.';
       changes.push({
         workOrderId: wo.workOrderNumber,
         field: 'endDate',
         oldValue: wo.endDate,
         newValue: toISO(end),
-        reason:
-          maxParentEnd != null || lastEndOnCenter != null
-            ? 'cascade from new start'
-            : 'shift or maintenance',
+        reason: endReason,
+        howCreated: endHow,
       });
+      explanationParts.push(
+        `Order ${wo.workOrderNumber} end moved to ${toISO(end)} (${endReason === 'cascade from new start' ? 'recalculated from new start' : 'shift- and maintenance-aware: work paused at cutoff, resumed after'}).`
+      );
     }
   }
 

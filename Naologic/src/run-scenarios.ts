@@ -5,8 +5,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { DateTime } from 'luxon';
 import { reflow } from './reflow/reflow.service';
 import type { ReflowInput } from './reflow/types';
+import { getWorkingSegments } from './utils/date-utils';
+import type { MaintenanceRange } from './utils/date-utils';
 
 const SAMPLE_DIR = path.join(__dirname, '..', 'sample-data');
 const SCENARIOS = [
@@ -55,10 +58,26 @@ async function main(): Promise<void> {
     }
 
     console.log('\n--- Updated Work Orders ---');
+    const parseUTC = (iso: string) => DateTime.fromISO(iso, { zone: 'utc' });
     for (const wo of result.updatedWorkOrders) {
-      console.log(
-        `  ${wo.workOrderNumber} [${wo.workCenterId}]: ${wo.startDate} → ${wo.endDate} (${wo.durationMinutes} min)`
+      const wc = input.workCenters.find((c) => c.name === wo.workCenterId);
+      const maintenanceRanges: MaintenanceRange[] = (wc?.maintenanceWindows ?? []).map(
+        (w) => ({ start: parseUTC(w.startDate), end: parseUTC(w.endDate) })
       );
+      const segments = getWorkingSegments(
+        parseUTC(wo.startDate),
+        wo.durationMinutes,
+        wc?.shifts ?? [],
+        maintenanceRanges
+      );
+      for (const seg of segments) {
+        const segMinutes = Math.floor(seg.end.diff(seg.start, 'minutes').minutes);
+        const startIso = seg.start.toISO() ?? '';
+        const endIso = seg.end.toISO() ?? '';
+        console.log(
+          `  ${wo.workOrderNumber} [${wo.workCenterId}]: ${startIso} → ${endIso} (${segMinutes} min)`
+        );
+      }
     }
 
     console.log('\n--- Changes ---');
@@ -69,6 +88,9 @@ async function main(): Promise<void> {
         console.log(
           `  ${c.workOrderId} ${c.field}: ${c.oldValue} → ${c.newValue}${c.reason ? ` [${c.reason}]` : ''}`
         );
+        if (c.howCreated) {
+          console.log(`    → ${c.howCreated}`);
+        }
       }
     }
 

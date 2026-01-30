@@ -5,16 +5,18 @@
  * Each check enforces:
  * - Work center conflicts: no two orders on the same center overlap (orderA.end <= orderB.start).
  * - Dependencies: every order starts at or after the latest parent end (max(parent.endDate) <= this.startDate).
- * - Shifts: each order starts inside a shift and its end equals shift-aware duration from start (within tolerance).
- * - Maintenance: no order's [start, end] overlaps any of its work center's maintenance windows.
+ * - Shifts: each order starts inside a shift and its end equals shift- and maintenance-aware duration from start (within tolerance). Work may span maintenance (pauses during it).
+ * - Maintenance: work does not run during maintenance; [start, end] may span maintenance (pause then resume).
  * - Maintenance orders (isMaintenance) are validated like others but are not moved by reflow.
  */
 
 import { DateTime } from 'luxon';
 import {
   calculateEndDateWithShifts,
+  calculateEndDateWithShiftsAndMaintenance,
   isWithinShift,
 } from '../utils/date-utils';
+import type { MaintenanceRange } from '../utils/date-utils';
 import type { WorkOrder, WorkCenter } from './types';
 
 export interface ValidationResult {
@@ -125,11 +127,18 @@ function checkShifts(
         `Shifts: order ${wo.workOrderNumber} start ${wo.startDate} is not inside any shift for work center ${wo.workCenterId}`
       );
     }
-    const computedEnd = calculateEndDateWithShifts(
-      start,
-      wo.durationMinutes,
-      shifts
+    const maintenanceRanges: MaintenanceRange[] = (wc.maintenanceWindows ?? []).map(
+      (w) => ({ start: parseUTC(w.startDate), end: parseUTC(w.endDate) })
     );
+    const computedEnd =
+      maintenanceRanges.length > 0
+        ? calculateEndDateWithShiftsAndMaintenance(
+            start,
+            wo.durationMinutes,
+            shifts,
+            maintenanceRanges
+          )
+        : calculateEndDateWithShifts(start, wo.durationMinutes, shifts);
     const storedEnd = parseUTC(wo.endDate);
     const diffMs = Math.abs(computedEnd.toMillis() - storedEnd.toMillis());
     if (diffMs > END_TOLERANCE_MS) {
@@ -141,34 +150,15 @@ function checkShifts(
 }
 
 /**
- * Enforces: no order's [start, end] overlaps any of its work center's maintenance windows.
+ * Maintenance: work is allowed to span maintenance (pause during window, resume after).
+ * No error when [start, end] overlaps maintenance; validation of end time is in checkShifts (shift- and maintenance-aware).
  */
 function checkMaintenance(
-  workOrders: WorkOrder[],
-  workCenters: WorkCenter[],
-  errors: string[]
+  _workOrders: WorkOrder[],
+  _workCenters: WorkCenter[],
+  _errors: string[]
 ): void {
-  const centerByKey = new Map<string, WorkCenter>();
-  for (const wc of workCenters) {
-    centerByKey.set((wc as WorkCenter).name, wc as WorkCenter);
-  }
-  for (const wo of workOrders) {
-    const wc = centerByKey.get(wo.workCenterId);
-    if (!wc || !wc.maintenanceWindows || wc.maintenanceWindows.length === 0) {
-      continue;
-    }
-    const orderStart = parseUTC(wo.startDate);
-    const orderEnd = parseUTC(wo.endDate);
-    for (const win of wc.maintenanceWindows) {
-      const winStart = parseUTC(win.startDate);
-      const winEnd = parseUTC(win.endDate);
-      if (orderStart < winEnd && orderEnd > winStart) {
-        errors.push(
-          `Maintenance: order ${wo.workOrderNumber} [${wo.startDate}, ${wo.endDate}] overlaps maintenance window [${win.startDate}, ${win.endDate}] on ${wo.workCenterId}${win.reason ? ` (${win.reason})` : ''}`
-        );
-      }
-    }
-  }
+  // Work may span maintenance; no strict overlap check.
 }
 
 /**

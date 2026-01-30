@@ -57,13 +57,15 @@ export interface ManufacturingOrder {
 /** Field name for a reflow change (start or end date). */
 export type ChangeField = 'startDate' | 'endDate';
 
-/** One recorded change from reflow: workOrderId, field, old/new value, optional reason. */
+/** One recorded change from reflow: workOrderId, field, old/new value, reason, and how the new value was derived. */
 export interface Change {
   workOrderId: string;
   field: ChangeField;
   oldValue: unknown;
   newValue: unknown;
   reason?: string;
+  /** Short explanation of how the new value was created (e.g. shift/maintenance-aware, cascade). */
+  howCreated?: string;
 }
 
 /** Reflow API result: updated work orders, list of changes, and explanation. */

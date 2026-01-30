@@ -1,0 +1,44 @@
+{
+  "workOrders": [
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-101",
+      "manufacturingOrderId": "MO-2",
+      "workCenterId": "Line2",
+      "startDate": "2026-01-05T16:00:00.000Z",
+      "endDate": "2026-01-05T18:00:00.000Z",
+      "durationMinutes": 120,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": []
+    }
+  ],
+  "workCenters": [
+    {
+      "docType": "workCenter",
+      "name": "Line2",
+      "shifts": [
+        { "dayOfWeek": 1, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 2, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 3, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 4, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 5, "startHour": 8, "endHour": 17 }
+      ],
+      "maintenanceWindows": [
+        {
+          "startDate": "2026-01-06T08:00:00.000Z",
+          "endDate": "2026-01-06T09:00:00.000Z",
+          "reason": "Planned maintenance"
+        }
+      ]
+    }
+  ],
+  "manufacturingOrders": [
+    {
+      "docType": "manufacturingOrder",
+      "manufacturingOrderNumber": "MO-2",
+      "itemId": "ITEM-002",
+      "quantity": 50,
+      "dueDate": "2026-01-08T17:00:00.000Z"
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "workOrders": [
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-001",
+      "manufacturingOrderId": "MO-1",
+      "workCenterId": "Line1",
+      "startDate": "2026-01-05T08:00:00.000Z",
+      "endDate": "2026-01-05T10:00:00.000Z",
+      "durationMinutes": 120,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": []
+    },
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-002",
+      "manufacturingOrderId": "MO-1",
+      "workCenterId": "Line1",
+      "startDate": "2026-01-05T09:00:00.000Z",
+      "endDate": "2026-01-05T10:00:00.000Z",
+      "durationMinutes": 60,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": ["WO-001"]
+    },
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-003",
+      "manufacturingOrderId": "MO-1",
+      "workCenterId": "Line1",
+      "startDate": "2026-01-05T10:00:00.000Z",
+      "endDate": "2026-01-05T10:30:00.000Z",
+      "durationMinutes": 30,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": ["WO-002"]
+    }
+  ],
+  "workCenters": [
+    {
+      "docType": "workCenter",
+      "name": "Line1",
+      "shifts": [
+        { "dayOfWeek": 1, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 2, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 3, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 4, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 5, "startHour": 8, "endHour": 17 }
+      ],
+      "maintenanceWindows": []
+    }
+  ],
+  "manufacturingOrders": [
+    {
+      "docType": "manufacturingOrder",
+      "manufacturingOrderNumber": "MO-1",
+      "itemId": "ITEM-001",
+      "quantity": 100,
+      "dueDate": "2026-01-10T17:00:00.000Z"
+    }
+  ]
+}

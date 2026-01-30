@@ -31,6 +31,29 @@ async function main(): Promise<void> {
     const input = loadScenario(filename);
     const result = reflow(input);
 
+    console.log('\n--- Maintenance Windows ---');
+    let anyMaintenance = false;
+    for (const wc of input.workCenters) {
+      if (wc.maintenanceWindows && wc.maintenanceWindows.length > 0) {
+        anyMaintenance = true;
+        console.log(`  [${wc.name}]`);
+        for (const m of wc.maintenanceWindows) {
+          const reason = m.reason ? ` — ${m.reason}` : '';
+          console.log(`    ${m.startDate} → ${m.endDate}${reason}`);
+        }
+      }
+    }
+    if (!anyMaintenance) {
+      console.log('  (none)');
+    }
+
+    console.log('\n--- Original Work Orders ---');
+    for (const wo of input.workOrders) {
+      console.log(
+        `  ${wo.workOrderNumber} [${wo.workCenterId}]: ${wo.startDate} → ${wo.endDate} (${wo.durationMinutes} min)`
+      );
+    }
+
     console.log('\n--- Updated Work Orders ---');
     for (const wo of result.updatedWorkOrders) {
       console.log(

@@ -14,6 +14,7 @@ import { DateTime } from 'luxon';
 import {
   calculateEndDateWithShifts,
   getNextShiftStart,
+  isWithinShift,
 } from '../utils/date-utils';
 import { validateSchedule } from './constraint-checker';
 import type {
@@ -27,8 +28,6 @@ import type {
 } from './types';
 
 const UTC = 'utc';
-/** Used when no dependency or prior order constrains start. */
-const EPOCH = DateTime.fromMillis(0, { zone: UTC });
 /** Max iterations when advancing past maintenance to avoid infinite loop. */
 const MAX_MAINTENANCE_ITERATIONS = 500;
 
@@ -77,7 +76,9 @@ function getNextAvailableStart(
   windows: MaintenanceWindow[]
 ): DateTime {
   let current = dt;
-  if (shifts.length > 0) {
+  // Only snap to next shift *start* when we're outside any shift (e.g. after 17:00 or on weekend).
+  // If we're already in shift (e.g. 10:00 right after parent), keep it so jobs run as soon as possible.
+  if (shifts.length > 0 && !isWithinShift(current, shifts)) {
     current = getNextShiftStart(current, shifts);
   }
   let iterations = 0;
@@ -87,7 +88,7 @@ function getNextAvailableStart(
       const wEnd = parseUTC(w.endDate);
       if (current >= wStart && current < wEnd) {
         current = wEnd;
-        if (shifts.length > 0) {
+        if (shifts.length > 0 && !isWithinShift(current, shifts)) {
           current = getNextShiftStart(current, shifts);
         }
         break;
@@ -197,10 +198,13 @@ export function reflow(input: ReflowInput): ReflowResult {
       }
     }
 
-    // Earliest possible start = max(last end on same center, max parent end); then align to next shift/maintenance slot.
+    // Earliest possible start = max(last end on same center, max parent end, order's own start); then align to next shift/maintenance slot.
+    // Use the order's start date as floor so we keep the same year/day when nothing else constrains (no 1970 fallback).
+    const orderStartFloor = parseUTC(wo.startDate);
     let candidateStart = DateTime.max(
-      lastEndOnCenter ?? EPOCH,
-      maxParentEnd ?? EPOCH
+      lastEndOnCenter ?? orderStartFloor,
+      maxParentEnd ?? orderStartFloor,
+      orderStartFloor
     );
     candidateStart = getNextAvailableStart(
       candidateStart,

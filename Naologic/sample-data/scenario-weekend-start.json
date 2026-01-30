@@ -1,0 +1,38 @@
+{
+  "workOrders": [
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-SAT",
+      "manufacturingOrderId": "MO-W",
+      "workCenterId": "LineW",
+      "startDate": "2026-01-03T10:00:00.000Z",
+      "endDate": "2026-01-03T11:00:00.000Z",
+      "durationMinutes": 60,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": []
+    }
+  ],
+  "workCenters": [
+    {
+      "docType": "workCenter",
+      "name": "LineW",
+      "shifts": [
+        { "dayOfWeek": 1, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 2, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 3, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 4, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 5, "startHour": 8, "endHour": 17 }
+      ],
+      "maintenanceWindows": []
+    }
+  ],
+  "manufacturingOrders": [
+    {
+      "docType": "manufacturingOrder",
+      "manufacturingOrderNumber": "MO-W",
+      "itemId": "ITEM-W",
+      "quantity": 10,
+      "dueDate": "2026-01-15T17:00:00.000Z"
+    }
+  ]
+}

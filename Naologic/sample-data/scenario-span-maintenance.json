@@ -1,0 +1,44 @@
+{
+  "workOrders": [
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-SPAN",
+      "manufacturingOrderId": "MO-S",
+      "workCenterId": "LineS",
+      "startDate": "2026-01-05T09:00:00.000Z",
+      "endDate": "2026-01-05T11:00:00.000Z",
+      "durationMinutes": 120,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": []
+    }
+  ],
+  "workCenters": [
+    {
+      "docType": "workCenter",
+      "name": "LineS",
+      "shifts": [
+        { "dayOfWeek": 1, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 2, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 3, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 4, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 5, "startHour": 8, "endHour": 17 }
+      ],
+      "maintenanceWindows": [
+        {
+          "startDate": "2026-01-05T10:00:00.000Z",
+          "endDate": "2026-01-05T12:00:00.000Z",
+          "reason": "Mid-morning maintenance"
+        }
+      ]
+    }
+  ],
+  "manufacturingOrders": [
+    {
+      "docType": "manufacturingOrder",
+      "manufacturingOrderNumber": "MO-S",
+      "itemId": "ITEM-S",
+      "quantity": 50,
+      "dueDate": "2026-01-10T17:00:00.000Z"
+    }
+  ]
+}

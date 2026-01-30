@@ -16,6 +16,12 @@ const SCENARIOS = [
   'scenario-delay-cascade.json',
   'scenario-shift-maintenance.json',
   'scenario-complex.json',
+  'scenario-weekend-start.json',
+  'scenario-span-maintenance.json',
+  'scenario-work-center-conflict.json',
+  'scenario-shift-end-only.json',
+  'scenario-maintenance-order.json',
+  'scenario-multiple-maintenance.json',
 ];
 
 function loadScenario(filename: string): ReflowInput {
@@ -48,6 +54,20 @@ async function main(): Promise<void> {
     }
     if (!anyMaintenance) {
       console.log('  (none)');
+    }
+
+    console.log('\n--- Dependencies ---');
+    const withDeps = input.workOrders.filter(
+      (wo) => wo.dependsOnWorkOrderIds && wo.dependsOnWorkOrderIds.length > 0
+    );
+    if (withDeps.length === 0) {
+      console.log('  (none)');
+    } else {
+      for (const wo of withDeps) {
+        console.log(
+          `  ${wo.workOrderNumber} depends on: ${wo.dependsOnWorkOrderIds!.join(', ')}`
+        );
+      }
     }
 
     console.log('\n--- Original Work Orders ---');

@@ -1,0 +1,49 @@
+{
+  "workOrders": [
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-A",
+      "manufacturingOrderId": "MO-C",
+      "workCenterId": "LineC",
+      "startDate": "2026-01-05T08:00:00.000Z",
+      "endDate": "2026-01-05T10:00:00.000Z",
+      "durationMinutes": 120,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": []
+    },
+    {
+      "docType": "workOrder",
+      "workOrderNumber": "WO-B",
+      "manufacturingOrderId": "MO-C",
+      "workCenterId": "LineC",
+      "startDate": "2026-01-05T08:30:00.000Z",
+      "endDate": "2026-01-05T09:30:00.000Z",
+      "durationMinutes": 60,
+      "isMaintenance": false,
+      "dependsOnWorkOrderIds": []
+    }
+  ],
+  "workCenters": [
+    {
+      "docType": "workCenter",
+      "name": "LineC",
+      "shifts": [
+        { "dayOfWeek": 1, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 2, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 3, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 4, "startHour": 8, "endHour": 17 },
+        { "dayOfWeek": 5, "startHour": 8, "endHour": 17 }
+      ],
+      "maintenanceWindows": []
+    }
+  ],
+  "manufacturingOrders": [
+    {
+      "docType": "manufacturingOrder",
+      "manufacturingOrderNumber": "MO-C",
+      "itemId": "ITEM-C",
+      "quantity": 100,
+      "dueDate": "2026-01-12T17:00:00.000Z"
+    }
+  ]
+}
